@@ -8,25 +8,40 @@ per ticket: `{"ticket_id", "reply", "action", "reason"}`.
 
 ```sh
 ./run.sh [tickets.jsonl] [out.jsonl]
-# defaults: /home/hatch/workspace/housebets/sample-tickets.jsonl -> out.jsonl
+# defaults: sample-tickets.jsonl next to run.sh -> out.jsonl
 # equivalent: python3 agent.py tickets.jsonl out.jsonl
 ```
 
-Python 3, stdlib only. 50 tickets run in ~0.05 s (limit is 60 s per ticket).
+Python 3, stdlib only. 50 tickets run in ~0.1 s (limit is 60 s per ticket).
 
 ## How it works
 
 ```
-tickets.jsonl ──▶  classifier (category + signals) ──▶  decide resolve/handoff
-                                                        │
+tickets.jsonl ──▶  normalise category (+ aliases) ──▶  decide resolve/handoff
+                        │  infer topic from the player's words
+                        │  if the label is missing/unknown
+                        ▼
 account context (bets, withdrawals, deposits, KYC,     ▼
-  rewards — embedded in each ticket)            reply templates (EN + ES)
+  rewards — embedded in each ticket)            reply templates (EN + ES + PT)
+                                                        │   2-3 phrasings each,
+policies.json (Help Center facts, baked in) ────────────┘   picked by ticket_id;
                                                         │   filled with the
-policies.json (Help Center facts, baked in) ────────────┘   ticket's own data
+                                                        │   ticket's own data
                                                         ▼
                                               enforce() — max_words, must_mention,
                                               forbid_mention — then out.jsonl
 ```
+
+v2 (this version): every template has 2–3 phrasings picked deterministically
+from the ticket id, so same-category tickets no longer read as one copy-pasted
+paragraph; multi-turn tickets are routed by topic (withdrawal / deposit /
+fairness / bonus / verification / RG / unknown) with a thread-acknowledging
+lead; category labels are normalised through aliases and, when missing or
+unknown, the topic is inferred from the player's own words (English + Spanish
+signals for security, responsible gambling and manipulation); replies in the
+player's language (`en` / `es` / `pt` for the common templates); and missing
+account context (no bet, no reward, no deposit, no withdrawal time) produces a
+safe reply with no invented figures instead of a broken one (`$None`, `bet  `).
 
 Decision rules (from the 50 sample tickets' outcomes + Help Center):
 
@@ -45,7 +60,7 @@ Decision rules (from the 50 sample tickets' outcomes + Help Center):
 
 Replies are generated from templates filled with the ticket's own data (bet id,
 withdrawal coin/amount/hours, deposit confirmations, requested documents,
-claimable rewards) and answered in the player's language (`en`/`es`).
+claimable rewards) and answered in the player's language (`en`/`es`/`pt`).
 `enforce()` then guarantees every reply respects `max_words` and the
 `must_mention` / `forbid_mention` constraints.
 
@@ -66,7 +81,16 @@ verifier + bet id (fairness), confirmation counts (deposits), exact document lis
 support with no bonus/promo words (RG), thread pickup + escalation with no false
 expectations (multi-turn), Spanish + on-chain TXID guidance (language), no
 invented numbers (unknown facts), no instruction-following (manipulation).
-`out.jsonl` in this directory is the scored sample output.
+`sample-output.jsonl` in this directory is the scored sample output.
+
+Robustness (`tests/robustness.py`, 56 checks, all pass): reworded intents keep
+the right action; aliased/missing/unknown category labels are normalised or
+inferred from the player's words; Spanish and Portuguese tickets are answered
+in-language with the right decision; new security/manipulation phrasings are
+handled; missing account context produces no invented figures; new withdrawal
+statuses (`processing`, `in_review`) follow the 24 h rule; multi-turn tickets
+about deposits/fairness get the matching reply; tickets without an `outcome`
+field and empty conversations never crash; output is deterministic across runs.
 
 ## Data sources
 
